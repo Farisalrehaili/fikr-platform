@@ -1,0 +1,13 @@
+{
+  "name": "tahsili-plus",
+  "version": "1.0.0",
+  "description": "منصة تحصيلي بلس - تطبيق كامل يعمل محلياً بدون أي حزم خارجية",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
