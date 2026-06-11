@@ -224,6 +224,19 @@ const routes = {
     if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
     db.prepare('DELETE FROM topic_names WHERE id=?').run(id); json(res, 200, { ok: true });
   },
+  'POST /api/topic-names/clear': (req, res, u) => {
+    if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
+    const n = db.prepare('SELECT COUNT(*) c FROM topic_names').get().c;
+    db.prepare('DELETE FROM topic_names').run(); json(res, 200, { deleted: n });
+  },
+  'POST /api/questions/clear': (req, res, u) => {
+    if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
+    const n = db.prepare('SELECT COUNT(*) c FROM questions').get().c;
+    db.prepare('DELETE FROM questions').run();
+    db.prepare('DELETE FROM topic_names').run();
+    logActivity(u.id, u.name, `حذف كل الأسئلة (${n})`);
+    json(res, 200, { deleted: n });
+  },
   'POST /api/questions': async (req, res, u) => {
     if (u.role !== 'admin' && u.role !== 'teacher') return json(res, 403, { error: 'صلاحية المدير أو المعلّم مطلوبة' });
     const { text, options, answer, subject, year, level, explanation, topic, grade, chapter, type, image_url, opt_images } = await body(req);
