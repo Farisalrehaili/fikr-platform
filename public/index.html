@@ -18,40 +18,44 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
-  --royal:#1e3a8a; --royal-2:#2546b8; --royal-light:#3b5bdb;
-  --gold:#d4af37; --gold-2:#f0c95a; --gold-soft:rgba(212,175,55,.12);
-  --grad:linear-gradient(135deg,#1e3a8a 0%,#3b5bdb 60%,#6d28d9 120%);
-  --grad-gold:linear-gradient(135deg,#d4af37,#f0c95a);
-  --radius:20px; --radius-sm:14px;
+  --royal:#4f46e5; --royal-2:#6366f1; --royal-light:#818cf8;
+  --gold:#e6b450; --gold-2:#f7d488; --gold-soft:rgba(230,180,80,.13);
+  --grad:linear-gradient(135deg,#4f46e5 0%,#7c3aed 55%,#a855f7 120%);
+  --grad-gold:linear-gradient(135deg,#e6b450,#f7d488);
+  --radius:22px; --radius-sm:15px;
   --t:.35s cubic-bezier(.4,0,.2,1);
-  --math:#3b82f6; --phys:#8b5cf6; --chem:#10b981; --bio:#f59e0b;
+  --math:#3b82f6; --phys:#a855f7; --chem:#10b981; --bio:#f59e0b;
 }
 [data-theme="dark"]{
-  --bg:#0a0e1a; --bg-2:#0f1525; --card:#141b2e; --card-2:#1a2238;
-  --border:rgba(255,255,255,.07); --border-strong:rgba(255,255,255,.13);
-  --text:#eef2ff; --text-2:#9aa6c4; --text-3:#64708f;
-  --shadow:0 20px 50px -20px rgba(0,0,0,.6); --glass:rgba(20,27,46,.7);
+  --bg:#070b16; --bg-2:#0c1322; --card:#111a2e; --card-2:#1a2540;
+  --border:rgba(255,255,255,.06); --border-strong:rgba(255,255,255,.12);
+  --text:#eff2fc; --text-2:#a2adcb; --text-3:#626f90;
+  --shadow:0 24px 60px -26px rgba(0,0,0,.72); --glass:rgba(13,20,37,.72);
 }
 [data-theme="light"]{
-  --bg:#f4f6fc; --bg-2:#eef1f9; --card:#ffffff; --card-2:#f7f9ff;
-  --border:rgba(20,30,70,.08); --border-strong:rgba(20,30,70,.14);
-  --text:#0f1733; --text-2:#52608a; --text-3:#8c98ba;
-  --shadow:0 20px 45px -22px rgba(30,58,138,.28); --glass:rgba(255,255,255,.75);
+  --bg:#eef1fa; --bg-2:#e5e9f6; --card:#ffffff; --card-2:#f5f7ff;
+  --border:rgba(28,40,90,.08); --border-strong:rgba(28,40,90,.14);
+  --text:#111733; --text-2:#4e5b82; --text-3:#8a96b8;
+  --shadow:0 24px 52px -26px rgba(79,70,229,.26); --glass:rgba(255,255,255,.78);
 }
+[data-accent="royal"]{--royal:#4f46e5;--royal-2:#6366f1;--royal-light:#818cf8;--grad:linear-gradient(135deg,#4f46e5 0%,#7c3aed 55%,#a855f7 120%)}
 [data-accent="emerald"]{--royal:#047857;--royal-2:#059669;--royal-light:#10b981;--grad:linear-gradient(135deg,#047857 0%,#10b981 70%,#34d399 120%)}
-[data-accent="purple"]{--royal:#5b21b6;--royal-2:#6d28d9;--royal-light:#8b5cf6;--grad:linear-gradient(135deg,#5b21b6 0%,#7c3aed 70%,#a78bfa 120%)}
+[data-accent="purple"]{--royal:#6d28d9;--royal-2:#7c3aed;--royal-light:#a78bfa;--grad:linear-gradient(135deg,#6d28d9 0%,#9333ea 60%,#c084fc 120%)}
+[data-accent="ocean"]{--royal:#0e7490;--royal-2:#0891b2;--royal-light:#22d3ee;--grad:linear-gradient(135deg,#0e7490 0%,#0891b2 60%,#22d3ee 120%)}
+[data-accent="rose"]{--royal:#be123c;--royal-2:#e11d48;--royal-light:#fb7185;--grad:linear-gradient(135deg,#9f1239 0%,#e11d48 60%,#fb7185 120%)}
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{
   font-family:'Tajawal',sans-serif;background:var(--bg);color:var(--text);
   transition:background var(--t),color var(--t);overflow-x:hidden;line-height:1.7;
+  letter-spacing:-.1px;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
 }
 body::before{
-  content:"";position:fixed;inset:0;z-index:-1;opacity:.5;pointer-events:none;
+  content:"";position:fixed;inset:0;z-index:-1;opacity:.6;pointer-events:none;
   background:
-    radial-gradient(800px 400px at 85% -5%,rgba(109,40,217,.14),transparent),
-    radial-gradient(700px 380px at 5% 10%,rgba(59,91,219,.14),transparent),
-    radial-gradient(600px 300px at 50% 110%,rgba(212,175,55,.08),transparent);
+    radial-gradient(880px 440px at 85% -8%,rgba(124,58,237,.17),transparent),
+    radial-gradient(760px 420px at 5% 8%,rgba(79,70,229,.16),transparent),
+    radial-gradient(640px 320px at 50% 112%,rgba(230,180,80,.07),transparent);
 }
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:10px}
@@ -97,7 +101,7 @@ body::before{
   width:100%;padding:11px 44px 11px 16px;border-radius:13px;border:1px solid var(--border);
   background:var(--card);color:var(--text);font-family:inherit;font-size:14px;transition:var(--t);
 }
-.search input:focus{outline:none;border-color:var(--royal-light);box-shadow:0 0 0 4px rgba(59,91,219,.12)}
+.search input:focus{outline:none;border-color:var(--royal-light);box-shadow:0 0 0 4px rgba(129,140,248,.16)}
 .search svg{position:absolute;inset-inline-start:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--text-3)}
 .topbar .spacer{flex:1}
 .icon-btn{
@@ -124,11 +128,12 @@ body::before{
 .section-head h2{font-family:'Cairo';font-size:26px;font-weight:900}
 .section-head p{color:var(--text-2);font-size:14px;margin-top:2px}
 .eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--gold);background:var(--gold-soft);padding:6px 13px;border-radius:30px;margin-bottom:12px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);transition:var(--t)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);transition:var(--t);box-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 10px 30px -22px rgba(0,0,0,.5)}
 .btn{
-  display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:13px;border:none;cursor:pointer;
-  font-family:inherit;font-weight:700;font-size:14.5px;transition:var(--t);
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 22px;border-radius:14px;border:none;cursor:pointer;
+  font-family:inherit;font-weight:700;font-size:14.5px;transition:var(--t);letter-spacing:-.2px;
 }
+.btn:active{transform:translateY(0) scale(.98)}
 .btn-primary{background:var(--grad);color:#fff;box-shadow:0 12px 26px -12px var(--royal-light)}
 .btn-primary:hover{transform:translateY(-2px);box-shadow:0 18px 34px -12px var(--royal-light)}
 .btn-gold{background:var(--grad-gold);color:#3a2e00}
@@ -450,6 +455,15 @@ table.tbl tr:hover td{background:var(--card-2)}
       <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="الوضع">
         <svg id="moonIco" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
       </button>
+      <div style="position:relative">
+        <button class="icon-btn" id="accentBtn" onclick="toggleAccentPicker(event)" title="لون المنصة">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 2a10 10 0 100 20 2 2 0 002-2 2 2 0 00-2-2h-1a2 2 0 110-4h3a4 4 0 004-4 8 8 0 00-8-8z"/></svg>
+        </button>
+        <div id="accentPop" style="display:none;position:absolute;top:52px;inset-inline-end:0;background:var(--card);border:1px solid var(--border-strong);border-radius:16px;box-shadow:var(--shadow);padding:14px;z-index:95;width:200px">
+          <div style="font-size:12px;font-weight:700;color:var(--text-3);margin-bottom:10px">لون المنصة</div>
+          <div id="accentSwatches" style="display:grid;grid-template-columns:repeat(5,1fr);gap:9px"></div>
+        </div>
+      </div>
       <div class="avatar" title="حسابي" onclick="openProfile()" style="cursor:pointer">ف</div>
     </header>
     <div class="content" id="content">
@@ -1264,9 +1278,37 @@ function enterApp(){
   if(ME.role!=='admin') setTimeout(maybeOnboard, 700);
 }
 function applyTheme(theme){
+  let saved=''; try{saved=localStorage.getItem('fikr_accent')||'';}catch(e){}
+  const acc=['emerald','purple','ocean','rose','royal'].includes(theme)?theme:saved;
   document.documentElement.removeAttribute('data-accent');
-  if(theme==='emerald'||theme==='purple') document.documentElement.setAttribute('data-accent',theme);
+  if(acc) document.documentElement.setAttribute('data-accent',acc);
 }
+const ACCENTS=[
+  {k:'royal',name:'ملكي',c:'linear-gradient(135deg,#4f46e5,#a855f7)'},
+  {k:'emerald',name:'زمردي',c:'linear-gradient(135deg,#047857,#34d399)'},
+  {k:'purple',name:'بنفسجي',c:'linear-gradient(135deg,#6d28d9,#c084fc)'},
+  {k:'ocean',name:'محيطي',c:'linear-gradient(135deg,#0e7490,#22d3ee)'},
+  {k:'rose',name:'وردي',c:'linear-gradient(135deg,#9f1239,#fb7185)'}
+];
+function applyAccent(k){
+  document.documentElement.setAttribute('data-accent',k);
+  try{localStorage.setItem('fikr_accent',k);}catch(e){}
+  try{ Object.values(charts).forEach(c=>{if(c)c.destroy()});charts={}; const act=document.querySelector('.nav-item.active'); if(act)renderCharts(act.dataset.page); }catch(e){}
+  renderAccentSwatches();
+}
+function renderAccentSwatches(){
+  const cur=document.documentElement.getAttribute('data-accent')||'royal';
+  const w=document.getElementById('accentSwatches'); if(!w)return;
+  w.innerHTML=ACCENTS.map(a=>`<div onclick="applyAccent('${a.k}')" title="${a.name}" style="height:30px;border-radius:9px;cursor:pointer;background:${a.c};border:2px solid ${a.k===cur?'var(--text)':'transparent'};box-shadow:0 4px 10px -4px rgba(0,0,0,.4);transition:var(--t)"></div>`).join('');
+}
+function toggleAccentPicker(e){
+  if(e)e.stopPropagation();
+  const p=document.getElementById('accentPop'); if(!p)return;
+  const show=p.style.display==='none'; p.style.display=show?'block':'none';
+  if(show){ renderAccentSwatches(); setTimeout(()=>document.addEventListener('click',closeAccentOnce),0); }
+}
+function closeAccentOnce(){ const p=document.getElementById('accentPop'); if(p)p.style.display='none'; document.removeEventListener('click',closeAccentOnce); }
+(function(){ try{ const a=localStorage.getItem('fikr_accent'); if(a)document.documentElement.setAttribute('data-accent',a); }catch(e){} })();
 
 /* ---- تعبئة كل أرقام الواجهة من قاعدة البيانات ---- */
 async function refreshUserUI(){
