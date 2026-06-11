@@ -72,7 +72,13 @@ for (const stmt of [
   'ALTER TABLE users ADD COLUMN school TEXT',
   'ALTER TABLE users ADD COLUMN region TEXT',
   'ALTER TABLE users ADD COLUMN parent_code TEXT',
+  'ALTER TABLE questions ADD COLUMN chapter TEXT',
+  'ALTER TABLE questions ADD COLUMN type TEXT',        // 'mcq' | 'tf'
+  'ALTER TABLE questions ADD COLUMN image_url TEXT',   // صورة السؤال
+  'ALTER TABLE questions ADD COLUMN opt_images TEXT',  // صور الخيارات (JSON)
 ]) { try { db.exec(stmt); } catch (e) {} }
+// فهارس للأداء مع عشرات الآلاف من الأسئلة
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_q_subject ON questions(subject); CREATE INDEX IF NOT EXISTS idx_q_topic ON questions(topic); CREATE INDEX IF NOT EXISTS idx_q_chapter ON questions(chapter); CREATE INDEX IF NOT EXISTS idx_prog_user ON progress(user_id); CREATE INDEX IF NOT EXISTS idx_res_user ON results(user_id);'); } catch (e) {}
 
 if (db.prepare('SELECT COUNT(*) c FROM users').get().c === 0) {
   console.log('🌱 تهيئة البيانات الأولية...');
@@ -186,10 +192,14 @@ const routes = {
     if (q.year) { sql += ' AND year=?'; p.push(q.year); }
     if (q.level) { sql += ' AND level=?'; p.push(q.level); }
     if (q.topic) { sql += ' AND topic=?'; p.push(q.topic); }
+    if (q.chapter) { sql += ' AND chapter=?'; p.push(q.chapter); }
+    if (q.type) { sql += ' AND type=?'; p.push(q.type); }
     if (q.grade) { sql += ' AND grade=?'; p.push(q.grade); }
     if (q.q) { sql += ' AND text LIKE ?'; p.push('%' + q.q + '%'); }
     sql += ' ORDER BY id DESC';
-    json(res, 200, db.prepare(sql).all(...p).map(r => ({ ...r, options: JSON.parse(r.options) })));
+    if (q.limit) { sql += ' LIMIT ? OFFSET ?'; p.push(Math.min(500, +q.limit || 50), +q.offset || 0); }
+    const rows = db.prepare(sql).all(...p).map(r => ({ ...r, options: JSON.parse(r.options), opt_images: r.opt_images ? JSON.parse(r.opt_images) : [] }));
+    json(res, 200, rows);
   },
   // قائمة الدروس/المواضيع المميزة (لفلترة بنك الأسئلة)
   'GET /api/topics': (req, res) => {
@@ -216,30 +226,62 @@ const routes = {
   },
   'POST /api/questions': async (req, res, u) => {
     if (u.role !== 'admin' && u.role !== 'teacher') return json(res, 403, { error: 'صلاحية المدير أو المعلّم مطلوبة' });
-    const { text, options, answer, subject, year, level, explanation, topic, grade } = await body(req);
+    const { text, options, answer, subject, year, level, explanation, topic, grade, chapter, type, image_url, opt_images } = await body(req);
     if (u.role === 'teacher' && u.subject && subject !== u.subject) return json(res, 403, { error: 'يمكنك إضافة أسئلة لمادتك فقط (' + u.subject + ')' });
+    if ((!text && !image_url) || !options || answer == null || !subject) return json(res, 400, { error: 'بيانات ناقصة' });
     logActivity(u.id, u.name, `أضاف سؤالاً في ${subject}`);
-    if (!text || !options || answer == null || !subject) return json(res, 400, { error: 'بيانات ناقصة' });
-    const info = db.prepare('INSERT INTO questions(text,options,answer,subject,year,level,explanation,topic,grade) VALUES(?,?,?,?,?,?,?,?,?)')
-      .run(text, JSON.stringify(options), answer, subject, year || '', level || 'متوسط', explanation || '', topic || '', grade || '');
+    const info = db.prepare('INSERT INTO questions(text,options,answer,subject,year,level,explanation,topic,grade,chapter,type,image_url,opt_images) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(text, JSON.stringify(options), answer, subject, year || '', level || 'متوسط', explanation || '', topic || '', grade || '', chapter || '', type || 'mcq', image_url || '', opt_images ? JSON.stringify(opt_images) : '');
     saveTopic(topic, subject, grade);
     json(res, 200, { id: info.lastInsertRowid });
   },
   // استيراد أسئلة دفعة واحدة (من ملف JSON)
   'POST /api/questions/import': async (req, res, u) => {
-    if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
+    if (u.role !== 'admin' && u.role !== 'teacher') return json(res, 403, { error: 'صلاحية المدير أو المعلّم مطلوبة' });
     const data = await body(req);
     const list = Array.isArray(data) ? data : (data.questions || []);
     if (!Array.isArray(list) || !list.length) return json(res, 400, { error: 'الملف لا يحتوي أسئلة صالحة' });
-    const ins = db.prepare('INSERT INTO questions(text,options,answer,subject,year,level,explanation,topic,grade) VALUES(?,?,?,?,?,?,?,?,?)');
-    let added = 0, skipped = 0;
-    for (const it of list) {
-      if (!it || !it.text || !Array.isArray(it.options) || it.answer == null || !it.subject) { skipped++; continue; }
-      ins.run(it.text, JSON.stringify(it.options), it.answer, it.subject, it.year || '', it.level || 'متوسط', it.explanation || '', it.topic || '', it.grade || '');
-      saveTopic(it.topic, it.subject, it.grade);
-      added++;
-    }
-    json(res, 200, { added, skipped });
+    const norm = s => (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
+    // مجموعة نصوص موجودة مسبقاً لكشف التكرار (مرة واحدة)
+    const existing = new Set(db.prepare('SELECT text FROM questions').all().map(r => norm(r.text)));
+    const batchSeen = new Set();
+    const ins = db.prepare('INSERT INTO questions(text,options,answer,subject,year,level,explanation,topic,grade,chapter,type,image_url,opt_images) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)');
+    let added = 0, skipped = 0, dupes = 0;
+    db.exec('BEGIN');
+    try {
+      for (const it of list) {
+        if (!it || !it.text || !Array.isArray(it.options) || it.answer == null || !it.subject) { skipped++; continue; }
+        const key = norm(it.text);
+        if (existing.has(key) || batchSeen.has(key)) { dupes++; continue; } // منع المكرر
+        batchSeen.add(key); existing.add(key);
+        ins.run(it.text, JSON.stringify(it.options), it.answer, it.subject, it.year || '', it.level || 'متوسط', it.explanation || '', it.topic || '', it.grade || '', it.chapter || '', it.type || 'mcq', it.image_url || '', it.opt_images ? JSON.stringify(it.opt_images) : '');
+        if (it.topic) saveTopic(it.topic, it.subject, it.grade);
+        added++;
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); return json(res, 500, { error: 'فشل الاستيراد: ' + e.message }); }
+    logActivity(u.id, u.name, `استورد ${added} سؤال`);
+    json(res, 200, { added, skipped, dupes });
+  },
+  // عدّادات الأسئلة لكل مادة/درس/فصل
+  'GET /api/qstats': (req, res, u) => {
+    json(res, 200, {
+      total: db.prepare('SELECT COUNT(*) c FROM questions').get().c,
+      bySubject: db.prepare('SELECT subject, COUNT(*) c FROM questions GROUP BY subject ORDER BY c DESC').all(),
+      byTopic: db.prepare("SELECT subject, topic, COUNT(*) c FROM questions WHERE topic<>'' GROUP BY subject,topic ORDER BY c DESC").all()
+    });
+  },
+  // رفع صورة (للسؤال أو الخيار) — يُخزّن على القرص ويرجع رابطاً
+  'POST /api/qimage': async (req, res, u) => {
+    if (u.role !== 'admin' && u.role !== 'teacher') return json(res, 403, { error: 'صلاحية مطلوبة' });
+    const { dataB64, origName } = await body(req);
+    if (!dataB64) return json(res, 400, { error: 'لا صورة' });
+    try {
+      const safe = (origName || 'img.png').replace(/[^\w.؀-ۿ-]/g, '_');
+      const filename = 'q' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '-' + safe;
+      await writeFile(join(UPLOADS, filename), Buffer.from(dataB64.split(',').pop(), 'base64'));
+      json(res, 200, { url: '/uploads/' + filename });
+    } catch (e) { json(res, 500, { error: 'تعذّر حفظ الصورة' }); }
   },
   'DELETE /api/questions/:id': (req, res, u, q, id) => {
     if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });

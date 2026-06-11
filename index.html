@@ -14,6 +14,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
   --royal:#1e3a8a; --royal-2:#2546b8; --royal-light:#3b5bdb;
@@ -757,9 +759,8 @@ table.tbl tr:hover td{background:var(--card-2)}
         <div id="admin-questions" class="admin-pane" style="display:none">
           <div class="card" style="padding:22px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px"><h3 style="font-family:Cairo;font-size:17px;font-weight:800">إدارة الأسئلة</h3>
-              <div style="display:flex;gap:8px"><button class="btn btn-ghost" onclick="importQuestions()">⬆ استيراد أسئلة (JSON)</button><button class="btn btn-primary" onclick="openAddQuestion()">＋ إضافة سؤال</button></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" onclick="downloadTemplate()">⬇ قالب CSV</button><button class="btn btn-gold" onclick="openImport()">📥 استيراد جماعي</button><button class="btn btn-primary" onclick="openAddQuestion()">＋ إضافة سؤال</button></div>
             </div>
-            <input type="file" id="importFile" accept="application/json,.json" style="display:none" onchange="doImportQuestions(this)">
             <table class="tbl"><thead><tr><th>السؤال</th><th>الدرس</th><th>المادة</th><th>الصعوبة</th><th>الإجراءات</th></tr></thead><tbody>
               <tr><td>ما ناتج اشتقاق sin(x)؟</td><td>رياضيات</td><td><span class="tag tag-mid">متوسط</span></td><td>1446</td><td><a onclick="adminToast('تعديل')" style="color:var(--royal-light);cursor:pointer">تعديل</a> · <a onclick="adminToast('حذف')" style="color:#ef4444;cursor:pointer">حذف</a></td></tr>
               <tr><td>وحدة قياس القوة هي؟</td><td>فيزياء</td><td><span class="tag tag-easy">سهل</span></td><td>1445</td><td><a onclick="adminToast('تعديل')" style="color:var(--royal-light);cursor:pointer">تعديل</a> · <a onclick="adminToast('حذف')" style="color:#ef4444;cursor:pointer">حذف</a></td></tr>
@@ -1423,7 +1424,9 @@ async function loadFavsNotes(){
 }
 function buildQCard(it,opt){
   const tagC={'سهل':'tag-easy','متوسط':'tag-mid','صعب':'tag-hard'};
-  const opts=it.options.map((op,i)=>`<div class="q-opt" onclick="revealQ(this,${i===it.answer})"><span class="key">${['أ','ب','ج','د'][i]}</span>${op}</div>`).join('');
+  const oimg=it.opt_images||[];
+  const opts=it.options.map((op,i)=>`<div class="q-opt" onclick="revealQ(this,${i===it.answer})"><span class="key">${['أ','ب','ج','د','هـ'][i]}</span>${op||''}${oimg[i]?`<img src="${oimg[i]}" style="max-height:46px;border-radius:6px;margin-inline-start:8px">`:''}</div>`).join('');
+  const qimg = it.image_url?`<img src="${it.image_url}" style="max-width:100%;max-height:220px;border-radius:12px;margin:8px 0;display:block">`:'';
   const del = (ME&&ME.role==='admin') ? `<span onclick="delQuestion(${it.id})" style="cursor:pointer;font-size:15px" title="حذف">🗑️</span>`:'';
   const fav = `<span onclick="toggleFav(${it.id},this)" style="cursor:pointer;font-size:18px" title="مفضلة">${FAV_IDS.has(it.id)?'⭐':'☆'}</span>`;
   const hasNote = NOTES[it.id]?'📝':'🗒️';
@@ -1437,7 +1440,7 @@ function buildQCard(it,opt){
   return `<div class="card q-card" data-qid="${it.id}">
     <div class="q-top"><span class="tag" style="background:var(--gold-soft);color:var(--gold)">${it.subject}</span>${topicTag}<span class="tag ${tagC[it.level]||'tag-mid'}">${it.level||''}</span><span class="tag" style="background:var(--card-2);color:var(--text-2)">${it.year||''}هـ</span>
     <div style="margin-inline-start:auto;display:flex;gap:9px;align-items:center">${mastered}${del}${report}${note}${fav}</div></div>
-    <div class="q-text">${it.text}</div>${opts}
+    <div class="q-text">${it.text||''}</div>${qimg}${opts}
     <div style="margin-top:10px;padding:12px 14px;border-radius:11px;background:var(--card-2);font-size:13px;display:none" data-ex>💡 <b>الشرح:</b> ${it.explanation||'—'} ${listen}</div>${noteBox}
     <div style="margin-top:9px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-3)">قيّم صعوبة السؤال: <span onclick="rateQ(${it.id},1,this)" style="cursor:pointer;font-size:17px" title="سهل">😌</span><span onclick="rateQ(${it.id},2,this)" style="cursor:pointer;font-size:17px" title="متوسط">😐</span><span onclick="rateQ(${it.id},3,this)" style="cursor:pointer;font-size:17px" title="صعب">😣</span></div>
   </div>`;
@@ -1539,17 +1542,22 @@ function runReviewExam(name, qs){
 async function delQuestion(id){ try{ await API('/questions/'+id,{method:'DELETE'}); adminToast('تم حذف السؤال'); renderBank(); loadAdminQuestions(); }catch(e){ adminToast(e.message); } }
 
 /* ---------- إضافة سؤال (يحفظ في القاعدة) ---------- */
+let NQ={img:'',optImgs:['','','','']};
 function openAddQuestion(){
-  if(!ME||ME.role!=='admin'){ adminToast('إضافة الأسئلة للمدير فقط'); return; }
+  if(!ME||(ME.role!=='admin'&&ME.role!=='teacher')){ adminToast('إضافة الأسئلة للمدير/المعلّم فقط'); return; }
+  NQ={img:'',optImgs:['','','','']};
+  const optRow=(k,ph)=>`<div style="display:flex;gap:6px;margin-bottom:8px;align-items:center"><input id="nq${k}" placeholder="${ph}" style="flex:1"><label class="btn btn-ghost" style="padding:8px 10px;cursor:pointer" title="صورة للخيار">📷<input type="file" accept="image/*" style="display:none" onchange="uploadQImg(this,'opt',${'ABCD'.indexOf(k)})"></label><span id="nqImg${k}" style="font-size:11px;color:#10b981"></span></div>`;
   openModal(`<div style="display:flex;justify-content:space-between;align-items:start"><h3>إضافة سؤال جديد</h3><button class="btn btn-ghost" style="padding:6px 12px" onclick="closeModal()">✕</button></div>
   <div class="field" style="margin-top:14px"><label>نص السؤال</label><input id="nqText" placeholder="اكتب نص السؤال"></div>
-  <div class="field"><label>الخيارات</label>
-    <input id="nqA" placeholder="الخيار أ" style="margin-bottom:8px"><input id="nqB" placeholder="الخيار ب" style="margin-bottom:8px"><input id="nqC" placeholder="الخيار ج" style="margin-bottom:8px"><input id="nqD" placeholder="الخيار د"></div>
+  <div class="field"><label>صورة السؤال (اختياري)</label><div style="display:flex;gap:8px;align-items:center"><label class="btn btn-ghost" style="cursor:pointer">📷 ارفع صورة<input type="file" accept="image/*" style="display:none" onchange="uploadQImg(this,'q')"></label><span id="nqImgQ" style="font-size:12px;color:#10b981"></span></div></div>
+  <div class="field"><label>نوع السؤال</label><select id="nqType" onchange="toggleNqType()"><option value="mcq">اختيار من متعدد</option><option value="tf">صح / خطأ</option></select></div>
+  <div class="field"><label>الخيارات</label><div id="nqOpts">${optRow('A','الخيار أ')}${optRow('B','الخيار ب')}${optRow('C','الخيار ج')}${optRow('D','الخيار د')}</div></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
     <div class="field"><label>الإجابة الصحيحة</label><select id="nqAns"><option value="0">أ</option><option value="1">ب</option><option value="2">ج</option><option value="3">د</option></select></div>
     <div class="field"><label>المادة</label><select id="nqSub" onchange="fillTopicList()"><option>رياضيات</option><option>فيزياء</option><option>كيمياء</option><option>أحياء</option></select></div>
     <div class="field"><label>المرحلة</label><select id="nqGrade" onchange="fillTopicList()"><option>أولى ثانوي</option><option>ثاني ثانوي</option><option>ثالث ثانوي</option></select></div>
-    <div class="field"><label>الدرس / الموضوع <a onclick="openTopicManager()" style="color:var(--royal-light);cursor:pointer;font-size:12px">(إدارة الدروس)</a></label><input id="nqTopic" list="topicList" placeholder="اختر من القائمة أو اكتب درساً جديداً"><datalist id="topicList"></datalist></div>
+    <div class="field"><label>الدرس / الموضوع <a onclick="openTopicManager()" style="color:var(--royal-light);cursor:pointer;font-size:12px">(إدارة)</a></label><input id="nqTopic" list="topicList" placeholder="اختر أو اكتب"><datalist id="topicList"></datalist></div>
+    <div class="field"><label>الفصل</label><input id="nqChapter" placeholder="مثال: الفصل الأول"></div>
     <div class="field"><label>السنة</label><select id="nqYear"><option>1446</option><option>1445</option><option>1444</option></select></div>
     <div class="field"><label>مستوى الصعوبة</label><select id="nqLvl"><option>سهل</option><option>متوسط</option><option>صعب</option></select></div>
   </div>
@@ -1557,6 +1565,20 @@ function openAddQuestion(){
   <div id="nqErr" style="display:none;color:#ef4444;font-size:13px;margin-bottom:10px"></div>
   <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="saveQuestion()">حفظ السؤال</button>`);
   fillTopicList();
+}
+function toggleNqType(){
+  const t=document.getElementById('nqType').value;
+  if(t==='tf'){ document.getElementById('nqA').value='صح'; document.getElementById('nqB').value='خطأ'; document.getElementById('nqC').value=''; document.getElementById('nqD').value=''; document.getElementById('nqC').closest('div').style.display='none'; document.getElementById('nqD').closest('div').style.display='none'; }
+  else { document.getElementById('nqC').closest('div').style.display=''; document.getElementById('nqD').closest('div').style.display=''; }
+}
+async function uploadQImg(input,kind,idx){
+  const f=input.files[0]; if(!f)return; if(f.size>4*1024*1024){ adminToast('الصورة كبيرة (<4 ميجا)'); return; }
+  const reader=new FileReader();
+  reader.onload=async()=>{ try{ const r=await API('/qimage',{method:'POST',body:JSON.stringify({dataB64:reader.result,origName:f.name})});
+    if(kind==='q'){ NQ.img=r.url; document.getElementById('nqImgQ').textContent='✓ تم رفع صورة السؤال'; }
+    else { NQ.optImgs[idx]=r.url; document.getElementById('nqImg'+'ABCD'[idx]).textContent='✓'; }
+  }catch(e){ adminToast(e.message); } };
+  reader.readAsDataURL(f);
 }
 async function fillTopicList(){
   const dl=document.getElementById('topicList'); if(!dl)return;
@@ -1604,25 +1626,114 @@ async function delTopicName(id){
 }
 async function saveQuestion(){
   const g=id=>document.getElementById(id).value.trim();
-  const options=[g('nqA'),g('nqB'),g('nqC'),g('nqD')];
-  const body={text:g('nqText'),options,answer:+document.getElementById('nqAns').value,subject:document.getElementById('nqSub').value,grade:document.getElementById('nqGrade').value,topic:g('nqTopic'),year:document.getElementById('nqYear').value,level:document.getElementById('nqLvl').value,explanation:g('nqEx')};
-  if(!body.text||options.some(o=>!o)){ const e=document.getElementById('nqErr'); e.textContent='الرجاء تعبئة نص السؤال وكل الخيارات'; e.style.display='block'; return; }
-  try{ await API('/questions',{method:'POST',body:JSON.stringify(body)}); closeModal(); adminToast('تم حفظ السؤال في القاعدة'); renderBank(); loadAdminQuestions(); populateTopics(); }
+  const type=document.getElementById('nqType').value;
+  let options=[g('nqA'),g('nqB'),g('nqC'),g('nqD')];
+  if(type==='tf') options=[g('nqA')||'صح',g('nqB')||'خطأ'];
+  options=options.filter(o=>o!=='');
+  const body={text:g('nqText'),options,answer:+document.getElementById('nqAns').value,subject:document.getElementById('nqSub').value,grade:document.getElementById('nqGrade').value,topic:g('nqTopic'),chapter:g('nqChapter'),type,year:document.getElementById('nqYear').value,level:document.getElementById('nqLvl').value,explanation:g('nqEx'),image_url:NQ.img,opt_images:NQ.optImgs};
+  const needImg = body.image_url || NQ.optImgs.some(x=>x);
+  if(!body.text&&!body.image_url){ const e=document.getElementById('nqErr'); e.textContent='اكتب نص السؤال أو أضف صورة له'; e.style.display='block'; return; }
+  if(options.length<2 || (options.some(o=>!o)&&!needImg)){ const e=document.getElementById('nqErr'); e.textContent='الرجاء تعبئة الخيارات (أو إضافة صور لها)'; e.style.display='block'; return; }
+  if(body.answer>=options.length) body.answer=0;
+  try{ await API('/questions',{method:'POST',body:JSON.stringify(body)}); closeModal(); adminToast('تم حفظ السؤال في القاعدة'); renderBank(); loadAdminQuestions(); loadStats(); populateTopics(); }
   catch(e){ const el=document.getElementById('nqErr'); el.textContent=e.message; el.style.display='block'; }
 }
-/* استيراد أسئلة من ملف JSON */
-function importQuestions(){ document.getElementById('importFile').click(); }
-function doImportQuestions(input){
-  const f=input.files[0]; if(!f)return; const reader=new FileReader();
-  reader.onload=async()=>{
-    let data; try{ data=JSON.parse(reader.result); }catch(e){ adminToast('الملف ليس JSON صالحاً'); input.value=''; return; }
-    try{ const r=await API('/questions/import',{method:'POST',body:JSON.stringify(data)});
-      adminToast(`تم استيراد ${r.added} سؤال${r.skipped?` (تجاهل ${r.skipped})`:''}`);
-      loadAdminQuestions(); renderBank(); populateTopics();
-    }catch(e){ adminToast(e.message); }
-    input.value='';
-  };
-  reader.readAsText(f);
+/* ============ الاستيراد الجماعي (CSV / Excel / JSON) ============ */
+let IMPORT_ROWS=[];
+const ANS_MAP={'أ':0,'ا':0,'A':0,'a':0,'1':0,'ب':1,'B':1,'b':1,'2':1,'ج':2,'C':2,'c':2,'3':2,'د':3,'D':3,'d':3,'4':3};
+const ANS_LETTER=['أ','ب','ج','د'];
+function parseAns(v){ if(v==null)return 0; const s=String(v).trim(); return ANS_MAP[s]!=null?ANS_MAP[s]:0; }
+function normTxt(s){ return (s||'').toString().toLowerCase().replace(/\s+/g,' ').trim(); }
+function downloadTemplate(){
+  const headers=['text','optionA','optionB','optionC','optionD','answer','subject','topic','chapter','level','type','explanation'];
+  const ex=['ما ناتج 2+2؟','3','4','5','6','ب','رياضيات','الأعداد','الفصل الأول','سهل','mcq','لأن 2+2=4'];
+  const ex2=['الأرض كروية','صح','خطأ','','','أ','أحياء','الكون','','سهل','tf','حقيقة علمية'];
+  const csv=[headers,ex,ex2].map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='fikr-questions-template.csv'; a.click();
+}
+function openImport(){
+  let ov=document.getElementById('importOverlay'); if(!ov){ov=document.createElement('div');ov.id='importOverlay';ov.className='sim-overlay';document.body.appendChild(ov);}
+  ov.style.display='flex'; document.body.style.overflow='hidden'; IMPORT_ROWS=[];
+  ov.innerHTML=`<div class="sim-head"><div style="font-weight:800;font-family:Cairo">📥 الاستيراد الجماعي للأسئلة</div><button class="btn btn-ghost" onclick="closeImport()">إغلاق</button></div>
+   <div style="flex:1;overflow:auto;padding:30px"><div style="max-width:560px;margin:0 auto;text-align:center">
+     <div style="font-size:50px;margin-bottom:10px">📚</div>
+     <h3 style="font-family:Cairo;font-size:22px;margin-bottom:8px">ارفع آلاف الأسئلة دفعة وحدة</h3>
+     <p style="color:var(--text-2);margin-bottom:20px">يدعم CSV و Excel (.xlsx) و JSON. نزّل القالب، عبّئه، وارفعه.</p>
+     <button class="btn btn-ghost" style="margin-bottom:16px" onclick="downloadTemplate()">⬇ تحميل قالب CSV</button>
+     <label class="book-btn" style="display:block;cursor:pointer;border:2px dashed var(--border-strong);padding:30px">
+       <input type="file" accept=".csv,.xlsx,.xls,.json,application/json" style="display:none" onchange="parseImportFile(this.files[0])">
+       <div style="font-size:30px">⬆</div><div style="font-weight:700;margin-top:6px">اختر ملف CSV / Excel / JSON</div>
+     </label>
+     <p style="color:var(--text-3);font-size:12px;margin-top:16px">الأعمدة: text, optionA-D, answer (أ/ب/ج/د), subject, topic, chapter, level, type (mcq/tf), explanation</p>
+   </div></div>`;
+}
+function closeImport(){ const ov=document.getElementById('importOverlay'); if(ov)ov.style.display='none'; document.body.style.overflow=''; }
+function parseImportFile(file){
+  if(!file)return; const name=file.name.toLowerCase();
+  const done=rows=>{ IMPORT_ROWS=rows.map(mapRow).filter(r=>r.text); renderReview(); };
+  if(name.endsWith('.json')){ const r=new FileReader(); r.onload=()=>{ try{ const d=JSON.parse(r.result); done(Array.isArray(d)?d:(d.questions||[])); }catch(e){ adminToast('JSON غير صالح'); } }; r.readAsText(file); }
+  else if(name.endsWith('.csv')){ Papa.parse(file,{header:true,skipEmptyLines:true,complete:res=>done(res.data)}); }
+  else if(name.endsWith('.xlsx')||name.endsWith('.xls')){ const r=new FileReader(); r.onload=()=>{ try{ const wb=XLSX.read(r.result,{type:'array'}); const ws=wb.Sheets[wb.SheetNames[0]]; done(XLSX.utils.sheet_to_json(ws)); }catch(e){ adminToast('تعذّر قراءة Excel'); } }; r.readAsArrayBuffer(file); }
+  else adminToast('صيغة غير مدعومة');
+}
+function mapRow(o){
+  // يدعم JSON (options array) و CSV/Excel (optionA-D)
+  let options = Array.isArray(o.options)? o.options : [o.optionA,o.optionB,o.optionC,o.optionD].filter(x=>x!=null&&String(x).trim()!=='');
+  options = options.map(x=>String(x).trim());
+  let answer = o.answer!=null && typeof o.answer==='number' ? o.answer : parseAns(o.answer);
+  const type = (o.type||'mcq').toString().toLowerCase().includes('tf')||/صح/.test(o.type||'')?'tf':'mcq';
+  if(type==='tf' && options.length<2) options=['صح','خطأ'];
+  return { text:(o.text||'').toString().trim(), options, answer, subject:(o.subject||'').toString().trim(), topic:(o.topic||'').toString().trim(), chapter:(o.chapter||'').toString().trim(), level:(o.level||'متوسط').toString().trim(), type, explanation:(o.explanation||'').toString().trim() };
+}
+function renderReview(){
+  const ov=document.getElementById('importOverlay'); if(!ov)return;
+  // كشف المكرر داخل الدفعة
+  const seen={}; let dupCount=0;
+  IMPORT_ROWS.forEach(r=>{ const k=normTxt(r.text); r._dup=!!seen[k]; if(seen[k])dupCount++; seen[k]=1; });
+  const valid=IMPORT_ROWS.filter(r=>r.text&&r.options.length>=2&&r.subject).length;
+  const preview=IMPORT_ROWS.slice(0,100);
+  const sel=(val,opts)=>opts.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('');
+  ov.innerHTML=`<div class="sim-head"><div style="font-weight:800;font-family:Cairo">📥 مراجعة قبل الحفظ — ${IMPORT_ROWS.length} سؤال</div><button class="btn btn-ghost" onclick="closeImport()">إغلاق</button></div>
+   <div style="padding:14px 22px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border);background:var(--card)">
+     <span class="tag tag-easy">صالح: ${valid}</span><span class="tag tag-hard">مكرر بالملف: ${dupCount}</span>
+     <span style="color:var(--text-3);font-size:12px">تعديل جماعي:</span>
+     <input id="bsTopic" placeholder="عيّن الدرس للكل" style="padding:7px 10px;border-radius:9px;border:1px solid var(--border);background:var(--card-2);color:var(--text);font-family:inherit;font-size:12px;width:130px"><button class="btn btn-ghost" style="padding:6px 10px;font-size:12px" onclick="bulkSet('topic',document.getElementById('bsTopic').value)">طبّق</button>
+     <input id="bsChapter" placeholder="عيّن الفصل للكل" style="padding:7px 10px;border-radius:9px;border:1px solid var(--border);background:var(--card-2);color:var(--text);font-family:inherit;font-size:12px;width:130px"><button class="btn btn-ghost" style="padding:6px 10px;font-size:12px" onclick="bulkSet('chapter',document.getElementById('bsChapter').value)">طبّق</button>
+     <select id="bsSubject" style="padding:7px;border-radius:9px;border:1px solid var(--border);background:var(--card-2);color:var(--text);font-family:inherit;font-size:12px"><option value="">عيّن المادة</option><option>رياضيات</option><option>فيزياء</option><option>كيمياء</option><option>أحياء</option></select><button class="btn btn-ghost" style="padding:6px 10px;font-size:12px" onclick="bulkSet('subject',document.getElementById('bsSubject').value)">طبّق</button>
+   </div>
+   <div style="flex:1;overflow:auto;padding:0 14px">
+     <table class="tbl" style="font-size:12.5px"><thead><tr><th>#</th><th>السؤال</th><th>الخيارات</th><th>الإجابة</th><th>المادة</th><th>الدرس</th><th>الفصل</th><th>الصعوبة</th><th>النوع</th><th></th></tr></thead><tbody id="reviewBody">
+     ${preview.map((r,i)=>`<tr style="${r._dup?'background:rgba(239,68,68,.08)':''}">
+       <td>${i+1}</td>
+       <td><input value="${(r.text||'').replace(/"/g,'&quot;')}" onchange="IMPORT_ROWS[${i}].text=this.value" style="width:200px;${impInput()}"></td>
+       <td style="color:var(--text-3)">${r.options.length} خيار</td>
+       <td><select onchange="IMPORT_ROWS[${i}].answer=+this.value" style="${impInput()}">${[0,1,2,3].slice(0,Math.max(2,r.options.length)).map(k=>`<option value="${k}" ${r.answer===k?'selected':''}>${ANS_LETTER[k]}</option>`).join('')}</select></td>
+       <td><select onchange="IMPORT_ROWS[${i}].subject=this.value" style="${impInput()}">${sel(r.subject,['','رياضيات','فيزياء','كيمياء','أحياء'])}</select></td>
+       <td><input value="${(r.topic||'').replace(/"/g,'&quot;')}" onchange="IMPORT_ROWS[${i}].topic=this.value" style="width:90px;${impInput()}"></td>
+       <td><input value="${(r.chapter||'').replace(/"/g,'&quot;')}" onchange="IMPORT_ROWS[${i}].chapter=this.value" style="width:80px;${impInput()}"></td>
+       <td><select onchange="IMPORT_ROWS[${i}].level=this.value" style="${impInput()}">${sel(r.level,['سهل','متوسط','صعب'])}</select></td>
+       <td><select onchange="IMPORT_ROWS[${i}].type=this.value" style="${impInput()}">${sel(r.type,['mcq','tf'])}</select></td>
+       <td><a onclick="removeImportRow(${i})" style="color:#ef4444;cursor:pointer">حذف</a></td></tr>`).join('')}
+     </tbody></table>
+     ${IMPORT_ROWS.length>100?`<p style="text-align:center;color:var(--text-3);padding:14px">… معاينة أول 100 سؤال. التعديل الجماعي والحفظ يشمل كل الـ ${IMPORT_ROWS.length}.</p>`:''}
+   </div>
+   <div style="padding:14px 22px;border-top:1px solid var(--border);background:var(--card);display:flex;justify-content:space-between;align-items:center;gap:10px">
+     <button class="btn btn-ghost" onclick="openImport()">← رجوع</button>
+     <button class="btn btn-primary" onclick="saveImport()">💾 حفظ ${valid} سؤال في القاعدة</button>
+   </div>`;
+}
+function impInput(){ return 'padding:5px 7px;border-radius:7px;border:1px solid var(--border);background:var(--card-2);color:var(--text);font-family:inherit;font-size:12px'; }
+function bulkSet(field,val){ if(!val)return; IMPORT_ROWS.forEach(r=>r[field]=val); renderReview(); adminToast('تم التطبيق على الكل'); }
+function removeImportRow(i){ IMPORT_ROWS.splice(i,1); renderReview(); }
+async function saveImport(){
+  const rows=IMPORT_ROWS.filter(r=>r.text&&r.options.length>=2&&r.subject&&!r._dup);
+  if(!rows.length){ adminToast('لا أسئلة صالحة — تأكد من المادة والخيارات'); return; }
+  adminToast('جارٍ الحفظ...');
+  try{ const r=await API('/questions/import',{method:'POST',body:JSON.stringify({questions:rows})});
+    closeImport(); adminToast(`✅ أُضيف ${r.added} سؤال${r.dupes?` · تجاهل ${r.dupes} مكرر`:''}${r.skipped?` · ${r.skipped} ناقص`:''}`);
+    loadAdminQuestions(); loadStats(); renderBank(); populateTopics();
+  }catch(e){ adminToast(e.message); }
 }
 
 /* ---------- حفظ نتيجة الاختبار في القاعدة ---------- */
@@ -1778,8 +1889,8 @@ function runSimulation(name, qs, minutes){
     ov.innerHTML=`<div class="sim-head"><div style="font-weight:800;font-family:Cairo">${name}</div><div class="sim-timer ${remaining<60?'danger':''}">⏱ ${fmt(remaining)}</div><button class="btn btn-ghost" onclick="window.__simEnd()">إنهاء</button></div>
     <div class="sim-body"><div class="sim-main">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span class="tag tag-mid">السؤال ${idx+1} من ${qs.length}</span><button class="btn btn-ghost ${flags.has(idx)?'flagged':''}" style="padding:8px 14px;font-size:13px" onclick="window.__simFlag()">🚩 ${flags.has(idx)?'مُعلّمة':'علّم للمراجعة'}</button></div>
-      <div class="q-text" style="font-size:18px;margin-bottom:16px">${q.text}</div>
-      ${q.options.map((op,k)=>`<div class="q-opt ${answers[idx]===k?'sel':''}" onclick="window.__simPick(${k})"><span class="key">${KEYS[k]}</span>${op}</div>`).join('')}
+      <div class="q-text" style="font-size:18px;margin-bottom:16px">${q.text||''}</div>${q.image_url?`<img src="${q.image_url}" style="max-width:100%;max-height:240px;border-radius:12px;margin-bottom:14px">`:''}
+      ${q.options.map((op,k)=>`<div class="q-opt ${answers[idx]===k?'sel':''}" onclick="window.__simPick(${k})"><span class="key">${KEYS[k]}</span>${op||''}${(q.opt_images&&q.opt_images[k])?`<img src="${q.opt_images[k]}" style="max-height:50px;border-radius:6px;margin-inline-start:8px">`:''}</div>`).join('')}
       <div style="display:flex;justify-content:space-between;margin-top:18px;gap:10px"><button class="btn btn-ghost" onclick="window.__simPrev()" ${idx===0?'style=\"opacity:.4;pointer-events:none\"':''}>→ السابق</button>${idx<qs.length-1?'<button class="btn btn-primary" onclick="window.__simNext()">التالي ←</button>':'<button class="btn btn-gold" onclick="window.__simEnd()">إنهاء وتسليم</button>'}</div>
     </div>
     <div class="sim-side"><div style="font-weight:800;margin-bottom:10px;font-family:Cairo">شبكة الأسئلة</div><div class="sim-grid">${gridHTML()}</div>
@@ -1939,8 +2050,16 @@ async function loadStudents(){
 async function toggleStudent(id){ try{ await API('/students/'+id+'/toggle',{method:'PATCH'}); adminToast('تم تحديث حالة الحساب'); loadStudents(); }catch(e){ adminToast(e.message); } }
 async function loadAdminQuestions(){
   const pane=document.getElementById('admin-questions'); if(!pane)return; const tb=pane.querySelector('tbody'); if(!tb)return;
-  try{ const list=await API('/questions'); const tagC={'سهل':'tag-easy','متوسط':'tag-mid','صعب':'tag-hard'};
-    tb.innerHTML=list.length? list.map(q=>`<tr><td>${q.text}</td><td>${q.topic||'—'}</td><td>${q.subject}</td><td><span class="tag ${tagC[q.level]||'tag-mid'}">${q.level||''}</span></td>
+  // عدّادات لكل مادة/درس
+  try{ const s=await API('/qstats'); let cb=document.getElementById('qCounts');
+    if(!cb){ cb=document.createElement('div'); cb.id='qCounts'; cb.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px'; pane.querySelector('.card').insertBefore(cb, pane.querySelector('table')); }
+    cb.innerHTML=`<span class="tag" style="background:var(--gold-soft);color:var(--gold)">الإجمالي: ${s.total}</span>`+
+      s.bySubject.map(x=>`<span class="tag" style="background:var(--card-2);color:var(--text-2)">${x.subject}: ${x.c}</span>`).join('')+
+      (s.byTopic.length?`<span class="tag" style="background:var(--card-2);color:var(--text-3)">دروس: ${s.byTopic.length}</span>`:'');
+  }catch(e){}
+  // الجدول (آخر 200 للأداء مع عشرات الآلاف)
+  try{ const list=await API('/questions?limit=200'); const tagC={'سهل':'tag-easy','متوسط':'tag-mid','صعب':'tag-hard'};
+    tb.innerHTML=list.length? list.map(q=>`<tr><td>${(q.text||'').slice(0,70)||'🖼️ صورة'}${q.image_url?' 🖼️':''}</td><td>${q.topic||'—'}</td><td>${q.subject}</td><td><span class="tag ${tagC[q.level]||'tag-mid'}">${q.level||''}</span></td>
       <td><a onclick="delQuestion(${q.id})" style="color:#ef4444;cursor:pointer">حذف</a></td></tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text-3);padding:18px">لا توجد أسئلة</td></tr>';
   }catch(e){}
 }
