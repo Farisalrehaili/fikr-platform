@@ -2719,13 +2719,19 @@ function applyAccessGate(){
     <button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="doLogout()">تسجيل الخروج</button></div>`;
   document.body.appendChild(ov);
 }
-function openSubscribe(){
-  openModal(`<div style="text-align:center"><div style="font-size:54px">💳</div>
+function subModalHtml(note){ return `<div style="text-align:center"><div style="font-size:54px">💳</div>
     <h3 style="font-family:Cairo;font-size:22px;font-weight:900;margin:8px 0">اشتراك التحصيلي الكامل</h3>
     <div style="font-family:Cairo;font-size:40px;font-weight:900;color:var(--gold)">149 <small style="font-size:16px;color:var(--text-3)">ر.س</small></div>
     <p style="color:var(--text-2);font-size:14px;margin:6px 0 18px">دفعة واحدة تكفيك طوال فترة التحصيلي — بدون تجديد.</p>
-    <p style="background:var(--card-2);border:1px solid var(--border);border-radius:13px;padding:14px;font-size:13.5px;color:var(--text-2);margin-bottom:16px">💬 بوابة الدفع الإلكتروني قيد التجهيز. لإتمام اشتراكك الآن تواصل مع إدارة المنصة وسيُفعَّل حسابك فوراً.</p>
-    <button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="closeModal()">حسناً</button></div>`,{width:'420px'});
+    <p style="background:var(--card-2);border:1px solid var(--border);border-radius:13px;padding:14px;font-size:13.5px;color:var(--text-2);margin-bottom:16px">${note}</p>
+    <button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="closeModal()">حسناً</button></div>`; }
+async function openSubscribe(){
+  openModal(subModalHtml('⏳ جارٍ تجهيز الدفع…'),{width:'420px'});
+  try{
+    const r=await API('/pay/create',{method:'POST',body:'{}'});
+    if(r&&r.url){ window.location.href=r.url; return; }
+    openModal(subModalHtml(r&&r.error?esc(r.error):'💬 بوابة الدفع قيد التجهيز. تواصل مع إدارة المنصة لتفعيل اشتراكك.'),{width:'420px'});
+  }catch(e){ openModal(subModalHtml('💬 بوابة الدفع قيد التجهيز. تواصل مع إدارة المنصة لتفعيل اشتراكك.'),{width:'420px'}); }
 }
 async function toggleSub(id){ try{ await API('/students/'+id+'/subscription',{method:'PATCH'}); loadStudents(); }catch(e){ adminToast(e.message);} }
 
@@ -2956,8 +2962,12 @@ async function doInstall(){ if(!deferredPrompt){ adminToast('على آيفون: 
   document.addEventListener('click',e=>{
     const t=e.target.closest('button'); if(t && t.textContent.includes('رفع ملف')){ e.stopImmediatePropagation(); openUploadFile(); }
   },true);
+  const paid=new URLSearchParams(location.search).get('paid');
   if(TOKEN){
-    try{ const d=await API('/me'); ME=d.user; enterApp(); askNotifications(); dailyReminderCheck(); return; }catch(e){ localStorage.removeItem('th_token'); TOKEN=''; }
+    try{ const d=await API('/me'); ME=d.user; enterApp(); askNotifications(); dailyReminderCheck();
+      if(paid==='1') setTimeout(()=>adminToast('🎉 تم تفعيل اشتراكك بنجاح — وصول كامل للمنصة!'),800);
+      else if(paid==='0') setTimeout(()=>adminToast('لم يكتمل الدفع. حاول مرة أخرى أو تواصل معنا.'),800);
+      return; }catch(e){ localStorage.removeItem('th_token'); TOKEN=''; }
   }
   buildAuth();
   // قادم من زر «ابدأ تجربتك المجانية» في صفحة الهبوط → افتح شاشة إنشاء حساب
