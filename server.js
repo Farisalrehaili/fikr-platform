@@ -76,9 +76,13 @@ for (const stmt of [
   'ALTER TABLE questions ADD COLUMN type TEXT',        // 'mcq' | 'tf'
   'ALTER TABLE questions ADD COLUMN image_url TEXT',   // صورة السؤال
   'ALTER TABLE questions ADD COLUMN opt_images TEXT',  // صور الخيارات (JSON)
+  'ALTER TABLE users ADD COLUMN trial_start TEXT',     // بداية التجربة المجانية
+  'ALTER TABLE users ADD COLUMN subscribed INTEGER DEFAULT 0', // مشترك مدفوع
 ]) { try { db.exec(stmt); } catch (e) {} }
 // فهارس للأداء مع عشرات الآلاف من الأسئلة
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_q_subject ON questions(subject); CREATE INDEX IF NOT EXISTS idx_q_topic ON questions(topic); CREATE INDEX IF NOT EXISTS idx_q_chapter ON questions(chapter); CREATE INDEX IF NOT EXISTS idx_prog_user ON progress(user_id); CREATE INDEX IF NOT EXISTS idx_res_user ON results(user_id);'); } catch (e) {}
+// إشعارات المنصة (يضيفها المدير ويراها الجميع)
+try { db.exec("CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, body TEXT, created_at TEXT DEFAULT (datetime('now')))"); } catch (e) {}
 
 if (db.prepare('SELECT COUNT(*) c FROM users').get().c === 0) {
   console.log('🌱 تهيئة البيانات الأولية...');
@@ -139,24 +143,21 @@ function getUser(req) {
   const token = (req.headers.authorization || '').replace('Bearer ', '');
   const s = db.prepare('SELECT * FROM sessions WHERE token=?').get(token);
   if (!s) return null;
-  const u = db.prepare('SELECT id,name,email,role,xp,streak,active,subject FROM users WHERE id=?').get(s.user_id);
+  const u = db.prepare('SELECT id,name,email,role,xp,streak,active,subject,trial_start,subscribed FROM users WHERE id=?').get(s.user_id);
   return (u && u.active) ? u : null;
 }
 
 // جدول المسارات
 const routes = {
   'POST /api/register': async (req, res) => {
-    let { name, email, password, code, phone, country } = await body(req);
+    let { name, email, password, phone, country } = await body(req);
     email = (email || '').trim().toLowerCase();
     if (name) name = name.trim();
-    code = (code || '').trim().toUpperCase();
+    phone = (phone || '').trim();
     if (!name || !email || !password) return json(res, 400, { error: 'كل الحقول مطلوبة' });
-    if (!code) return json(res, 400, { error: 'كود التفعيل مطلوب' });
-    const codeRow = db.prepare('SELECT code FROM codes WHERE code=? AND used=0').get(code);
-    if (!codeRow) return json(res, 400, { error: 'كود التفعيل غير صحيح أو مستخدم مسبقاً' });
+    if (!phone) return json(res, 400, { error: 'رقم الجوال مطلوب' });
     if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) return json(res, 400, { error: 'البريد مسجّل مسبقاً' });
-    const info = db.prepare('INSERT INTO users(name,email,password,phone,country) VALUES(?,?,?,?,?)').run(name, email, hashPw(password), phone || '', country || 'السعودية');
-    db.prepare('UPDATE codes SET used=1, used_by=? WHERE code=?').run(info.lastInsertRowid, code);
+    const info = db.prepare('INSERT INTO users(name,email,password,phone,country,trial_start) VALUES(?,?,?,?,?,?)').run(name, email, hashPw(password), phone, country || 'السعودية', dayStr());
     const token = makeToken();
     db.prepare('INSERT INTO sessions(token,user_id) VALUES(?,?)').run(token, info.lastInsertRowid);
     const user = db.prepare('SELECT id,name,email,role,xp,streak FROM users WHERE id=?').get(info.lastInsertRowid);
@@ -179,12 +180,29 @@ const routes = {
     if (!u || !verifyPw(password, u.password)) return json(res, 400, { error: 'البريد أو كلمة المرور غير صحيحة' });
     if (!u.active) return json(res, 403, { error: 'الحساب موقوف' });
     const streak = updateStreak(u); // تحديث أيام المذاكرة عند كل دخول
+    // منح تجربة مجانية تلقائياً للطالب عند أول دخول إن لم تكن مضبوطة
+    if (u.role === 'student' && !u.trial_start) { db.prepare('UPDATE users SET trial_start=? WHERE id=?').run(dayStr(), u.id); u.trial_start = dayStr(); }
     const token = makeToken();
     db.prepare('INSERT INTO sessions(token,user_id) VALUES(?,?)').run(token, u.id);
-    json(res, 200, { token, user: { id: u.id, name: u.name, email: u.email, role: u.role, xp: u.xp, streak, level: levelOf(u.xp) } });
+    json(res, 200, { token, user: { id: u.id, name: u.name, email: u.email, role: u.role, xp: u.xp, streak, level: levelOf(u.xp), trial_start: u.trial_start || '', subscribed: u.subscribed || 0 } });
   },
   'GET /api/me': (req, res, u) => json(res, 200, { user: { ...u, level: levelOf(u.xp) } }),
   'POST /api/logout': (req, res, u) => { const t=(req.headers.authorization||'').replace('Bearer ',''); db.prepare('DELETE FROM sessions WHERE token=?').run(t); json(res,200,{ok:true}); },
+
+  // ===== إشعارات المنصة =====
+  'GET /api/notifications': (req, res, u) => json(res, 200, db.prepare('SELECT * FROM notifications ORDER BY id DESC LIMIT 50').all()),
+  'POST /api/notifications': async (req, res, u) => {
+    if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
+    const { title, body: b } = await body(req);
+    if (!title || !title.trim()) return json(res, 400, { error: 'اكتب عنوان الإشعار' });
+    const info = db.prepare('INSERT INTO notifications(title,body) VALUES(?,?)').run(title.trim(), (b || '').trim());
+    logActivity(u.id, u.name, 'أضاف إشعاراً');
+    json(res, 200, { id: info.lastInsertRowid });
+  },
+  'DELETE /api/notifications/:id': (req, res, u, q, id) => {
+    if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
+    db.prepare('DELETE FROM notifications WHERE id=?').run(id); json(res, 200, { ok: true });
+  },
 
   'GET /api/questions': (req, res, u, q) => {
     let sql = 'SELECT * FROM questions WHERE 1=1', p = [];
@@ -300,6 +318,15 @@ const routes = {
     if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
     db.prepare('DELETE FROM questions WHERE id=?').run(id); json(res, 200, { ok: true });
   },
+  'PUT /api/questions/:id': async (req, res, u, q, id) => {
+    if (u.role !== 'admin' && u.role !== 'teacher') return json(res, 403, { error: 'صلاحية المدير أو المعلّم مطلوبة' });
+    const { text, options, answer, subject, year, level, explanation, topic, grade, chapter, type, image_url, opt_images } = await body(req);
+    if ((!text && !image_url) || !options || answer == null || !subject) return json(res, 400, { error: 'بيانات ناقصة' });
+    db.prepare('UPDATE questions SET text=?,options=?,answer=?,subject=?,year=?,level=?,explanation=?,topic=?,grade=?,chapter=?,type=?,image_url=?,opt_images=? WHERE id=?')
+      .run(text || '', JSON.stringify(options), answer, subject, year || '', level || 'متوسط', explanation || '', topic || '', grade || '', chapter || '', type || 'mcq', image_url || '', opt_images ? JSON.stringify(opt_images) : '', id);
+    saveTopic(topic, subject, grade);
+    json(res, 200, { ok: true, id: +id });
+  },
 
   // ===== الدروس (مقسّمة حسب القسم/المادة/المرحلة) =====
   'GET /api/lessons': (req, res, u, q) => {
@@ -322,6 +349,14 @@ const routes = {
   'DELETE /api/lessons/:id': (req, res, u, q, id) => {
     if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
     db.prepare('DELETE FROM lessons WHERE id=?').run(id); json(res, 200, { ok: true });
+  },
+  'PUT /api/lessons/:id': async (req, res, u, q, id) => {
+    if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
+    const { section, subject, grade, title, video_url } = await body(req);
+    if (!section || !subject || !grade || !title) return json(res, 400, { error: 'بيانات ناقصة' });
+    db.prepare('UPDATE lessons SET section=?,subject=?,grade=?,title=?,video_url=? WHERE id=?')
+      .run(section, subject, grade, title, video_url || '', id);
+    json(res, 200, { ok: true, id: +id });
   },
 
   'GET /api/files': (req, res) => json(res, 200, db.prepare('SELECT * FROM files ORDER BY id DESC').all()),
@@ -392,6 +427,20 @@ const routes = {
       favorites: db.prepare('SELECT COUNT(*) c FROM favorites WHERE user_id=?').get(u.id).c,
       recent: results.slice(0, 5)
     });
+  },
+  // ===== أرقام الصفحة الرئيسية + الإنجازات (بيانات حيّة) =====
+  'GET /api/home-stats': (req, res, u) => {
+    const sec = (s) => { const r = db.prepare("SELECT COUNT(*) total, SUM(CASE WHEN p.user_id IS NOT NULL THEN 1 ELSE 0 END) done FROM lessons l LEFT JOIN progress p ON p.lesson_id=l.id AND p.user_id=? WHERE l.section=?").get(u.id, s); return r.total ? Math.round((r.done || 0) * 100 / r.total) : 0; };
+    const foundation = sec('تأسيس'), collections = sec('تجميعات');
+    const totalQ = db.prepare('SELECT COUNT(*) c FROM questions').get().c;
+    const attempted = db.prepare('SELECT COUNT(DISTINCT question_id) c FROM (SELECT question_id FROM mistakes WHERE user_id=?1 UNION SELECT question_id FROM favorites WHERE user_id=?1)').get(u.id).c;
+    const bank = totalQ ? Math.round(attempted * 100 / totalQ) : 0;
+    const results = db.prepare('SELECT score,total FROM results WHERE user_id=?').all(u.id);
+    const examsCount = results.length;
+    const exams = Math.min(100, examsCount * 20);
+    const highExams = results.filter(r => r.total && (r.score * 100 / r.total) >= 90).length;
+    const perfectExam = results.some(r => r.total && r.score === r.total);
+    json(res, 200, { foundation, collections, bank, exams, streak: u.streak || 0, level: levelOf(u.xp), examsCount, highExams, perfectExam });
   },
   // ===== تتبّع مشاهدة الدروس =====
   'GET /api/progress': (req, res, u) => json(res, 200, db.prepare('SELECT lesson_id FROM progress WHERE user_id=?').all(u.id).map(r => r.lesson_id)),
@@ -628,7 +677,7 @@ const routes = {
 
   'GET /api/students': (req, res, u) => {
     if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
-    json(res, 200, db.prepare(`SELECT u.id,u.name,u.email,u.xp,u.streak,u.active,
+    json(res, 200, db.prepare(`SELECT u.id,u.name,u.email,u.xp,u.streak,u.active,u.subscribed,u.trial_start,
         (SELECT COUNT(*) FROM results r WHERE r.user_id=u.id) AS exams,
         (SELECT ROUND(AVG(r.score*100.0/r.total),1) FROM results r WHERE r.user_id=u.id) AS avg_score
       FROM users u WHERE u.role='student' ORDER BY u.xp DESC`).all());
@@ -638,6 +687,20 @@ const routes = {
     const s = db.prepare('SELECT active FROM users WHERE id=?').get(id);
     db.prepare('UPDATE users SET active=? WHERE id=?').run(s.active ? 0 : 1, id);
     json(res, 200, { active: s.active ? 0 : 1 });
+  },
+  'PATCH /api/students/:id/subscription': (req, res, u, q, id) => {
+    if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
+    const s = db.prepare('SELECT subscribed FROM users WHERE id=?').get(id);
+    const nv = s.subscribed ? 0 : 1;
+    db.prepare('UPDATE users SET subscribed=? WHERE id=?').run(nv, id);
+    json(res, 200, { subscribed: nv });
+  },
+  // ===== العملاء (كل المسجّلين) =====
+  'GET /api/customers': (req, res, u) => {
+    if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
+    json(res, 200, db.prepare(`SELECT u.id,u.name,u.email,u.role,u.phone,u.country,u.city,u.school,u.region,u.xp,u.streak,u.subscribed,u.trial_start,u.active,u.created_at,
+        (SELECT COUNT(*) FROM results r WHERE r.user_id=u.id) AS exams
+      FROM users u WHERE u.role IN ('student','teacher') ORDER BY datetime(u.created_at) DESC, u.id DESC`).all());
   },
   'GET /api/stats': (req, res, u) => {
     if (u.role !== 'admin') return json(res, 403, { error: 'صلاحية المدير مطلوبة' });
