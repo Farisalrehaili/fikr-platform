@@ -204,6 +204,40 @@ const routes = {
     db.prepare('DELETE FROM notifications WHERE id=?').run(id); json(res, 200, { ok: true });
   },
 
+  // ===== الدفع (Moyasar) — اشتراك 149 ر.س =====
+  'POST /api/pay/create': async (req, res, u) => {
+    const key = process.env.MOYASAR_SECRET;
+    const amount = parseInt(process.env.SUB_PRICE_HALALAS || '14900'); // 149 ر.س
+    if (!key) return json(res, 200, { configured: false, error: 'بوابة الدفع غير مفعّلة بعد. (أضف مفتاح Moyasar السري في إعدادات Railway: MOYASAR_SECRET).' });
+    const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0];
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const base = proto + '://' + host;
+    try {
+      const r = await fetch('https://api.moyasar.com/v1/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Basic ' + Buffer.from(key + ':').toString('base64') },
+        body: JSON.stringify({ amount, currency: 'SAR', description: 'اشتراك منصة فِكر — كامل فترة التحصيلي', callback_url: base + '/api/pay/callback', metadata: { user_id: String(u.id), email: u.email } })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.url) return json(res, 200, { configured: true, error: (d.message || 'تعذّر إنشاء فاتورة الدفع') });
+      json(res, 200, { configured: true, url: d.url });
+    } catch (e) { json(res, 200, { configured: true, error: 'تعذّر الاتصال ببوابة الدفع' }); }
+  },
+  'GET /api/pay/callback': async (req, res, u, q) => {
+    const key = process.env.MOYASAR_SECRET;
+    const id = q.id || q.invoice_id;
+    const go = (ok) => { res.writeHead(302, { Location: ok ? '/?paid=1' : '/?paid=0' }); res.end(); };
+    if (!key || !id) return go(false);
+    try {
+      const r = await fetch('https://api.moyasar.com/v1/invoices/' + encodeURIComponent(id), { headers: { Authorization: 'Basic ' + Buffer.from(key + ':').toString('base64') } });
+      const d = await r.json().catch(() => ({}));
+      const paid = d && d.status === 'paid';
+      const uid = d && d.metadata && parseInt(d.metadata.user_id);
+      if (paid && uid) { db.prepare('UPDATE users SET subscribed=1 WHERE id=?').run(uid); logActivity(uid, '', 'فعّل اشتراكه عبر الدفع'); }
+      go(paid);
+    } catch (e) { go(false); }
+  },
+
   'GET /api/questions': (req, res, u, q) => {
     let sql = 'SELECT * FROM questions WHERE 1=1', p = [];
     if (q.subject) { sql += ' AND subject=?'; p.push(q.subject); }
@@ -762,7 +796,7 @@ const routes = {
   },
 };
 
-const PUBLIC_ROUTES = new Set(['POST /api/register', 'POST /api/login', 'GET /api/questions', 'GET /api/files', 'GET /api/leaderboard', 'GET /api/parent/:code']);
+const PUBLIC_ROUTES = new Set(['POST /api/register', 'POST /api/login', 'GET /api/questions', 'GET /api/files', 'GET /api/leaderboard', 'GET /api/parent/:code', 'GET /api/pay/callback']);
 
 async function serveStatic(req, res) {
   let urlPath = decodeURIComponent(req.url.split('?')[0]);
